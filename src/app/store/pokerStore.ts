@@ -1,0 +1,309 @@
+import { create } from 'zustand';
+import Peer, { DataConnection } from 'peerjs';
+
+export interface Participant {
+  user: string;
+  score: number | null;
+  submitted: boolean;
+}
+
+interface PokerState {
+  // Connection
+  peer: Peer | null;
+  peerId: string | null;
+  isHost: boolean;
+  connections: Map<string, DataConnection>;
+  
+  // Project
+  projectId: string | null;
+  username: string | null;
+  
+  // Participants
+  participants: Participant[];
+  myScore: number | null;
+  
+  // Reveal status
+  revealed: boolean;
+  average: number | null;
+  
+  // Actions
+  initializePeer: (username: string, isHost: boolean, projectId?: string) => Promise<void>;
+  connect: (projectId: string, username: string) => void;
+  submitScore: (score: number) => void;
+  revealScores: () => void;
+  resetVoting: () => void;
+  disconnect: () => void;
+}
+
+export const usePokerStore = create<PokerState>((set, get) => ({
+  peer: null,
+  peerId: null,
+  isHost: false,
+  connections: new Map(),
+  projectId: null,
+  username: null,
+  participants: [],
+  myScore: null,
+  revealed: false,
+  average: null,
+  
+  initializePeer: async (username: string, isHost: boolean, projectId?: string) => {
+    const state = get();
+    
+    // Clean up existing peer
+    if (state.peer) {
+      state.peer.destroy();
+    }
+    
+    // Create new peer
+    const peer = new Peer({
+
+    });
+    
+    return new Promise((resolve, reject) => {
+      peer.on('open', (id) => {
+        set({
+          peer,
+          peerId: id,
+          isHost,
+          projectId: isHost ? id : projectId,
+          username,
+          participants: isHost ? [{ user: username, score: null, submitted: false }] : [],
+        });
+        
+        console.log("peerId", id)
+        if (isHost) {
+          // Host listens for incoming connections
+          peer.on('connection', (conn) => {
+            const connections = get().connections;
+            connections.set(conn.peer, conn);
+            set({ connections: new Map(connections) });
+            
+            var usr
+            conn.on('data', (data: any) => {
+              var user = handleIncomingMessage(data, conn);
+              if(user){
+                usr = user
+              }
+            });
+            
+            conn.on('close', () => {
+              const connections = get().connections;
+              connections.delete(conn.peer);
+              set({ connections: new Map(connections) });
+              
+              // Remove participant
+              if(usr){
+                const participants = get().participants.filter(p => p.user !== usr);
+                set({ participants });
+                broadcastStatus();
+              }
+            });
+          });
+        }
+        
+        resolve();
+      });
+      
+      peer.on('error', (err) => {
+        console.error('Peer error:', err);
+        reject(err);
+      });
+    });
+  },
+  
+  connect: (projectId: string, username: string) => {
+    const state = get();
+    if (!state.peer) return;
+    
+    const conn = state.peer.connect(projectId);
+    
+    conn.on('open', () => {
+      // Send connect message
+      conn.send({
+        type: 'connect',
+        user: username,
+      });
+      
+      const connections = state.connections;
+      connections.set(conn.peer, conn);
+      set({ connections: new Map(connections) });
+      
+      // Listen for data
+      conn.on('data', (data: any) => {
+        handleIncomingMessage(data, conn);
+      });
+    });
+    
+    conn.on('error', (err) => {
+      console.error('Connection error:', err);
+    });
+  },
+  
+  submitScore: (score: number) => {
+    const state = get();
+    
+    set({ myScore: score });
+    
+    if (state.isHost) {
+      // Host updates their own score
+      const participants = state.participants.map(p => 
+        p.user === state.username ? { ...p, score, submitted: true } : p
+      );
+      set({ participants });
+      broadcastStatus();
+    } else {
+      // Send to host
+      state.connections.forEach(conn => {
+        conn.send({
+          type: 'submitSP',
+          user: state.username,
+          score,
+        });
+      });
+    }
+  },
+  
+  revealScores: () => {
+    const state = get();
+    if (!state.isHost) return;
+    
+    // Calculate average
+    const scores = state.participants
+      .filter(p => p.submitted && p.score !== null)
+      .map(p => p.score!);
+    
+    const average = scores.length > 0
+      ? scores.reduce((a, b) => a + b, 0) / scores.length
+      : 0;
+    
+    set({ revealed: true, average });
+    
+    // Broadcast reveal
+    state.connections.forEach(conn => {
+      conn.send({
+        type: 'reveal',
+      });
+    });
+    
+    broadcastStatus();
+  },
+  
+  resetVoting: () => {
+    const state = get();
+    if (!state.isHost) return;
+    
+    const participants = state.participants.map(p => ({
+      ...p,
+      score: null,
+      submitted: false,
+    }));
+    
+    set({ participants, revealed: false, average: null, myScore: null });
+    broadcastStatus();
+  },
+  
+  disconnect: () => {
+    const state = get();
+    
+    state.connections.forEach(conn => conn.close());
+    state.peer?.destroy();
+    
+    set({
+      peer: null,
+      peerId: null,
+      connections: new Map(),
+      projectId: null,
+      username: null,
+      participants: [],
+      myScore: null,
+      revealed: false,
+      average: null,
+    });
+  },
+}));
+
+// Helper functions
+function handleIncomingMessage(data: any, conn: DataConnection):string|undefined {
+  const state = usePokerStore.getState();
+  
+  switch (data.type) {
+    case 'connect':
+      if (state.isHost) {
+        // Add new participant
+        const participants = [...state.participants, {
+          user: data.user,
+          score: null,
+          submitted: false,
+        }];
+        usePokerStore.setState({ participants });
+        
+        // Send current status to new participant
+        conn.send({
+          type: 'status',
+          project: state.projectId,
+          average: state.average,
+          scores: state.revealed ? state.participants : state.participants.map(p => ({
+            user: p.user,
+            score: null,
+            submitted: p.submitted,
+          })),
+          revealed: state.revealed,
+        });
+        
+        // Broadcast to all
+        broadcastStatus();
+        return data.user
+      }
+      break;
+      
+    case 'submitSP':
+      if (state.isHost) {
+        // Update participant score
+        const participants = state.participants.map(p =>
+          p.user === data.user ? { ...p, score: data.score, submitted: true } : p
+        );
+        usePokerStore.setState({ participants });
+        broadcastStatus();
+      }
+      break;
+      
+    case 'status':
+      // Update local state with status from host
+      if (!state.isHost) {
+        usePokerStore.setState({
+          participants: data.scores,
+          average: data.average,
+          revealed: data.revealed,
+        });
+      }
+      break;
+      
+    case 'reveal':
+      if (!state.isHost) {
+        usePokerStore.setState({ revealed: true });
+      }
+      break;
+  }
+}
+
+function broadcastStatus() {
+  const state = usePokerStore.getState();
+  if (!state.isHost) return;
+  
+  const statusMessage = {
+    type: 'status',
+    project: state.projectId,
+    average: state.average,
+    scores: state.revealed ? state.participants : state.participants.map(p => ({
+      user: p.user,
+      score: null,
+      submitted: p.submitted,
+    })),
+    revealed: state.revealed,
+  };
+  
+  state.connections.forEach(conn => {
+    conn.send(statusMessage);
+  });
+}
