@@ -115,6 +115,14 @@ export const usePokerStore = create<PokerState>((set, get) => ({
         resolve();
       });
 
+      peer.on('disconnected', () => {
+        console.log("Peer disconnected from server.");
+        if (!peer.destroyed) {
+          console.log("Attempting to reconnect...");
+          peer.reconnect();
+        }
+      });
+
       peer.on('error', (err) => {
         console.error('Peer error:', err);
         reject(err);

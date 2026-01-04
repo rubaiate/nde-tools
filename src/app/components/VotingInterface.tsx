@@ -23,6 +23,14 @@ export const VotingInterface: React.FC = () => {
   } = usePokerStore();
 
   const [copied, setCopied] = React.useState(false);
+  const [isSmallScreen, setIsSmallScreen] = React.useState(false);
+
+  React.useEffect(() => {
+    const handleResize = () => setIsSmallScreen(window.innerWidth < 768);
+    handleResize(); // Check on mount
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const copyToClipboard = () => {
     if (projectId) {
@@ -129,8 +137,8 @@ export const VotingInterface: React.FC = () => {
           // Radii for the ellipse (table size + offset)
           // Table is approx 450x220, so radius X ~ 225+60, Y ~ 110+60
           // Adjust based on container size mainly
-          const radiusX = 240; // Horizontal spread
-          const radiusY = 160; // Vertical spread
+          const radiusX = isSmallScreen ? 145 : 240; // Horizontal spread
+          const radiusY = isSmallScreen ? 100 : 160; // Vertical spread
 
           // If purely responsive, percentages are safer but harder to center perfectly with arbitrary size
           // Let's use CSS translate to center the item itself
