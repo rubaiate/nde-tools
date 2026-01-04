@@ -58,7 +58,12 @@ export const usePokerStore = create<PokerState>((set, get) => ({
     // Create new peer
     console.log("Initializing peer...");
     const peer = new Peer({
-
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+        ],
+      },
     });
 
     return new Promise((resolve, reject) => {

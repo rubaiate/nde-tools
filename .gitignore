@@ -1,2 +1,13 @@
 node_modules
 dist/**
+
+# Yarn
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+.pnp.*
+.yarn-integrity
+.yarn/install-state.gz
