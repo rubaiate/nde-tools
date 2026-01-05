@@ -15,7 +15,32 @@ export default function App() {
     if (projectIdParam) {
       setUrlProjectId(projectIdParam);
     }
-  }, []);
+
+    // Attempt to restore session
+    const tryRestoreSession = async () => {
+      if (username && projectId && !usePokerStore.getState().peer) {
+        // If we have a username and project ID but no peer (e.g. reload)
+        // Check if we were host
+        const isHost = usePokerStore.getState().isHost;
+
+        console.log("Restoring session...", { username, projectId, isHost });
+
+        const { initializePeer, connect } = usePokerStore.getState();
+
+        await initializePeer(username, isHost, projectId);
+
+        if (!isHost) {
+          // If we are participant, we need to reconnect to the host
+          // Wait a bit for peer to be ready
+          setTimeout(() => {
+            connect(projectId, username);
+          }, 500);
+        }
+      }
+    };
+
+    tryRestoreSession();
+  }, [username, projectId]);
 
   // Show voting interface if user has joined/created project
   if (projectId && username) {
