@@ -259,17 +259,29 @@ export const usePokerStore = create<PokerState>()(
       },
 
       updateUsername: (newUsername: string) => {
-        set({ username: newUsername });
         const state = get();
+        const oldUsername = state.username;
+
+        set({ username: newUsername });
+
         // Update self in participants list
         const participants = state.participants.map(p =>
-          p.user === state.username ? { ...p, user: newUsername } : p
+          p.user === oldUsername ? { ...p, user: newUsername } : p
         );
         set({ participants });
 
         // Notify others
         if (state.isHost) {
           broadcastStatus();
+        } else {
+          // Send update message to host
+          state.connections.forEach(conn => {
+            conn.send({
+              type: 'updateUser',
+              user: oldUsername,
+              newUser: newUsername,
+            });
+          });
         }
       },
     }),
@@ -325,6 +337,17 @@ function handleIncomingMessage(data: any, conn: DataConnection): string | undefi
         // Update participant score
         const participants = state.participants.map(p =>
           p.user === data.user ? { ...p, score: data.score, submitted: true } : p
+        );
+        usePokerStore.setState({ participants });
+        broadcastStatus();
+      }
+      break;
+
+    case 'updateUser':
+      if (state.isHost) {
+        // Find and update participant
+        const participants = state.participants.map(p =>
+          p.user === data.user ? { ...p, user: data.newUser } : p
         );
         usePokerStore.setState({ participants });
         broadcastStatus();
